@@ -1,57 +1,50 @@
 import cv2
 import numpy as np
 
-def create_sample_video(output_path='sample_traffic.mp4', duration=10, fps=30, width=1280, height=720):
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+def generate_sample_video(filename='sample_traffic.mp4', duration=10, fps=30):
+    width, height = 1280, 720
+    # Use 'mp4v' or 'h264' if available. 'avc1' sometimes works better on Windows.
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v') 
+    out = cv2.VideoWriter(filename, fourcc, fps, (width, height))
+
+    # Vehicles: list of [x, y, w, h, color, speed]
+    vehicles = []
     
-    # Simple car simulation
-    class Car:
-        def __init__(self, x, y, speed, color):
-            self.x = x
-            self.y = y
-            self.speed = speed
-            self.color = color
-            self.width = 60
-            self.height = 100
-
-        def move(self):
-            self.y += self.speed
-            if self.y > height:
-                self.y = -self.height
-
-        def draw(self, frame):
-            cv2.rectangle(frame, (int(self.x), int(self.y)), (int(self.x + self.width), int(self.y + self.height)), self.color, -1)
-
-    cars = []
-    import random
-    for i in range(5): # 5 lanes
-        lane_x = 200 + i * 150
-        for j in range(3): # 3 cars per lane initially
-            y = random.randint(-500, height)
-            speed = random.randint(5, 15)
-            color = (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
-            cars.append(Car(lane_x, y, speed, color))
-
-    for _ in range(duration * fps):
+    # Spawn lanes
+    lanes = [200, 500, 800, 1100]
+    
+    for i in range(duration * fps):
         frame = np.zeros((height, width, 3), dtype=np.uint8)
         
         # Draw road
-        cv2.rectangle(frame, (150, 0), (950, height), (100, 100, 100), -1)
-        # Draw lanes
-        for i in range(1, 5):
-            x = 200 + i * 150 - 25 # line position
+        cv2.rectangle(frame, (0, 0), (width, height), (100, 100, 100), -1)
+        for x in lanes:
             cv2.line(frame, (x, 0), (x, height), (255, 255, 255), 2)
             
-        # Draw cars
-        for car in cars:
-            car.move()
-            car.draw(frame)
-            
+        # Draw Stop Line
+        cv2.line(frame, (0, 200), (width, 200), (0, 255, 0), 5) # Green line
+        cv2.putText(frame, "Signal: GREEN", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        
+        # Spawn new vehicles randomly
+        if i % 30 == 0: # Every 1 second
+            lane = lanes[np.random.randint(0, len(lanes))] - 100 # Center in lane
+            color = (np.random.randint(0, 255), np.random.randint(0, 255), np.random.randint(0, 255))
+            # x, y, w, h, color, speed
+            vehicles.append([lane, 720, 60, 100, color, np.random.randint(3, 8)])
+
+        # Update and Draw Vehicles
+        for v in vehicles:
+            v[1] -= v[5] # Move up
+            cv2.rectangle(frame, (v[0], v[1]), (v[0]+v[2], v[1]+v[3]), v[4], -1)
+        
+        # Remove off-screen vehicles
+        vehicles = [v for v in vehicles if v[1] > -150]
+        
         out.write(frame)
         
     out.release()
-    print(f"Sample video saved to {output_path}")
+    return True
 
 if __name__ == "__main__":
-    create_sample_video()
+    generate_sample_video()
+    print("Sample video created.")

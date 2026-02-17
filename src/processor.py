@@ -6,7 +6,17 @@ from shapely.geometry import Point, Polygon, LineString
 
 class TrafficAnalyzer:
     def __init__(self, model_path='yolov8n.pt', use_color_detection=False):
-        self.model = YOLO(model_path)
+        self.model_path = model_path
+        self.use_color_detection = use_color_detection
+        self.model = None # Lazy load or pass in
+        if not self.use_color_detection:
+             # Load model if not passed? 
+             # Better: assume model is loaded outside or load once
+             self.model = YOLO(self.model_path)
+             
+        self.reset()
+
+    def reset(self):
         self.track_history = defaultdict(lambda: [])
         self.queue_roi = None 
         self.stop_line = None 
@@ -14,9 +24,8 @@ class TrafficAnalyzer:
         self.frame_count = 0
         self.violations = 0
         self.violated_ids = set()
-        self.use_color_detection = use_color_detection  # For synthetic video testing
         self.next_track_id = 0
-        self.prev_centers = {}  # For simple tracking in color mode
+        self.prev_centers = {} 
 
     def set_roi(self, points):
         """Points: list of (x, y) tuples"""
@@ -27,6 +36,8 @@ class TrafficAnalyzer:
         """Line: list of two (x, y) tuples"""
         if line:
             self.stop_line = LineString(line)
+            
+    # ... (rest of methods) ...
 
     def update_signal(self):
         # Simulate signal: Green (0-150), Red (150-300), etc. (5s interval at 30fps)
@@ -143,26 +154,29 @@ class TrafficAnalyzer:
             if results[0].boxes is not None and results[0].boxes.id is not None:
                 boxes = results[0].boxes.xywh.cpu()
                 track_ids = results[0].boxes.id.int().cpu().tolist()
+                class_ids = results[0].boxes.cls.int().cpu().tolist()
 
-                for box, track_id in zip(boxes, track_ids):
-                    x, y, w, h = box
-                    center = Point(x, y)
-                    
-                    track = self.track_history[track_id]
-                    track.append((float(x), float(y)))
-                    if len(track) > 30:
-                        track.pop(0)
+                for box, track_id, class_id in zip(boxes, track_ids, class_ids):
+                    # COCO classes: 2=car, 3=motorcycle, 5=bus, 7=truck
+                    if class_id in [2, 3, 5, 7]:
+                        x, y, w, h = box
+                        center = Point(x, y)
+                        
+                        track = self.track_history[track_id]
+                        track.append((float(x), float(y)))
+                        if len(track) > 30:
+                            track.pop(0)
 
-                    if self.queue_roi and self.queue_roi.contains(center):
-                        current_queue_length += 1
+                        if self.queue_roi and self.queue_roi.contains(center):
+                            current_queue_length += 1
 
-                    if self.stop_line and self.signal_state == "RED":
-                        if track_id not in self.violated_ids and len(track) >= 2:
-                            path = LineString(track[-2:])
-                            if path.intersects(self.stop_line):
-                                self.violations += 1
-                                self.violated_ids.add(track_id)
-                                cv2.circle(annotated_frame, (int(x), int(y)), 20, (0, 0, 255), -1)
+                        if self.stop_line and self.signal_state == "RED":
+                            if track_id not in self.violated_ids and len(track) >= 2:
+                                path = LineString(track[-2:])
+                                if path.intersects(self.stop_line):
+                                    self.violations += 1
+                                    self.violated_ids.add(track_id)
+                                    cv2.circle(annotated_frame, (int(x), int(y)), 20, (0, 0, 255), -1)
 
         # Draw ROI
         if self.queue_roi:
@@ -216,7 +230,7 @@ class TrafficAnalyzer:
         
         return annotated_frame, stats
 
-    def process_video(self, video_path):
+    def process_video(self, video_path, skip_frames=2):
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             return
@@ -226,6 +240,11 @@ class TrafficAnalyzer:
             if not ret:
                 break
             
+            # Frame Skipping
+            if self.frame_count % (skip_frames + 1) != 0:
+                self.frame_count += 1
+                continue
+
             processed_frame, stats = self.process_frame(frame)
             yield processed_frame, stats
             
